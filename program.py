@@ -61,6 +61,7 @@ def process_files():
                 else:
                     # ถ้าไม่ใช่บิล (เช่น เป็นสินค้า P-xxx) ให้ลำดับเป็นว่าง
                     df.at[idx, 'ลำดับ'] = ''
+                    
             
             # บันทึกไฟล์ใหม่ในโฟลเดอร์ที่สร้าง โดยใช้ชื่อเดิม + "แก้ไขแล้ว"
             output_file_name = f"{os.path.splitext(file_name)[0]}_แก้ไขแล้ว{os.path.splitext(file_name)[1]}"
@@ -71,20 +72,26 @@ def process_files():
             workbook = load_workbook(output_file)
             worksheet = workbook.active
 
-            # กำหนดรูปแบบตัวเลขเป็นจำนวนเต็ม
+            # กำหนดรูปแบบตัวเลขในคอลัมน์ 'ราคาต่อหน่วย', 'จำนวน', 'ราคาสุทธิ'
             numeric_columns = ['ราคาต่อหน่วย', 'จำนวน', 'ราคาสุทธิ']
             col_indices = [df.columns.get_loc(col) + 1 for col in numeric_columns]  # +1 เพราะ openpyxl เริ่มที่ 1
             for col_idx in col_indices:
                 for row in range(2, worksheet.max_row + 1):  # เริ่มที่แถว 2 (ข้าม header)
                     cell = worksheet.cell(row=row, column=col_idx)
-                    cell.number_format = '0'
+                    # ถ้าค่าในเซลล์เป็น 0 (หรือใกล้เคียง) ให้กำหนดรูปแบบพิเศษ
+                    if cell.value is not None and isinstance(cell.value, (int, float)) and abs(cell.value) < 0.0001:
+                        cell.number_format = '"-"'
+                    else:
+                        cell.number_format = '0'  # รูปแบบปกติ (จำนวนเต็ม)
 
-            # คำนวณความกว้างอัตโนมัติสำหรับแต่ละคอลัมน์
+            # คำนวณความกว้างอัตโนมัติสำหรับแต่ละคอลัมน์ (ไม่คูณ 1.2)
             for i, column in enumerate(df.columns, 1):
                 col_letter = chr(64 + i)  # แปลงเลขคอลัมน์เป็นตัวอักษร (A, B, C, ...)
                 # หาความยาวสูงสุดของข้อความในคอลัมน์ (รวม header)
                 max_length = max(df[column].astype(str).apply(len).max(), len(str(column)))
-                # ปรับความกว้าง
+                # ถ้าคอลัมน์อยู่ใน numeric_columns และมีค่า 0 ให้เผื่อความกว้างสำหรับ "-"
+                if column in numeric_columns:
+                    max_length = max(max_length, 1)  # ความกว้างอย่างน้อย 1 สำหรับ "-"
                 worksheet.column_dimensions[col_letter].width = max_length
 
             # บันทึกไฟล์ที่ปรับรูปแบบและความกว้างแล้ว
