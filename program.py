@@ -1,27 +1,80 @@
 import tkinter as tk
 from tkinter import filedialog, ttk
 import os
+import pandas as pd
+
+# ตัวแปร global สำหรับเก็บ path
+input_path = ""
+output_path = ""
 
 def browse_input_folder():
+    global input_path
     folder_path = filedialog.askdirectory()
     if folder_path:
-            input_label.config(text=folder_path)
-            excel_files = [f for f in os.listdir(folder_path) if f.endswith(('.xlsx', '.xls'))]
-            file_count = len(excel_files)
-            file_info_label.config(text=f"พบไฟล์ Excel: {file_count} ไฟล์")
+        input_path = folder_path
+        input_label.config(text=input_path)
+        excel_files = [f for f in os.listdir(input_path) if f.endswith(('.xlsx', '.xls'))]
+        file_info_label.config(text=f"พบไฟล์ Excel: {len(excel_files)} ไฟล์")
 
 def browse_output_folder():
+    global output_path
     folder_path = filedialog.askdirectory()
     if folder_path:
-        output_label.config(text=folder_path)
+        output_path = folder_path
+        output_label.config(text=output_path)
 
 def process_files():
-    # เพิ่มโค้ดสำหรับจัดการไฟล์ Excel ได้ที่นี่
-    pass
+    # ตรวจสอบว่าเลือกโฟลเดอร์ครบหรือไม่
+    if not input_path or not output_path:
+        file_info_label.config(text="กรุณาเลือกโฟลเดอร์ทั้งสอง")
+        return
+    # ดึงรายการไฟล์ Excel จาก input folder
+    excel_files = [f for f in os.listdir(input_path) if f.endswith(('.xlsx', '.xls'))]
+    if not excel_files:
+        file_info_label.config(text="ไม่พบไฟล์ Excel ในโฟลเดอร์")
+        return
+    
+    # สร้างโฟลเดอร์ใหม่ใน output path โดยใช้ชื่อ input folder + "แก้ไขแล้ว"
+    input_folder_name = os.path.basename(input_path)
+    new_output_folder = os.path.join(output_path, f"{input_folder_name}_แก้ไขแล้ว")
+    os.makedirs(new_output_folder, exist_ok=True)
+
+    for file_name in excel_files:
+        file_path = os.path.join(input_path, file_name)
+        try:
+            # อ่านไฟล์ Excel
+            df = pd.read_excel(file_path)
+            
+            # ตรวจสอบว่ามีคอลัมน์ครบตามที่ระบุ
+            expected_columns = ['ลำดับ', 'รายการ', 'วันที่', 'ราคาต่อหน่วย', 'จำนวน', 'ราคาสุทธิ']
+            if not all(col in df.columns for col in expected_columns):
+                file_info_label.config(text=f"ไฟล์ {file_name} ไม่มีคอลัมน์ที่ต้องการ")
+                continue
+            
+            # สร้างลำดับใหม่สำหรับบิล (ORR)
+            new_order = 1
+            for idx, row in df.iterrows():
+                if isinstance(row['รายการ'], str) and row['รายการ'].startswith('ORR'):
+                    df.at[idx, 'ลำดับ'] = new_order
+                    new_order += 1
+                else:
+                    # ถ้าไม่ใช่บิล (เช่น เป็นสินค้า P-xxx) ให้ลำดับเป็นว่าง
+                    df.at[idx, 'ลำดับ'] = ''
+            
+            # บันทึกไฟล์ใหม่ในโฟลเดอร์ที่สร้าง โดยใช้ชื่อเดิม + "แก้ไขแล้ว"
+            output_file_name = f"{os.path.splitext(file_name)[0]}_แก้ไขแล้ว{os.path.splitext(file_name)[1]}"
+            output_file = os.path.join(new_output_folder, output_file_name)
+            df.to_excel(output_file, index=False)
+            
+            file_info_label.config(text=f"ประมวลผลสำเร็จ: {file_name}")
+        
+        except Exception as e:
+            file_info_label.config(text=f"เกิดข้อผิดพลาดกับ {file_name}: {str(e)}")
+            continue
 
 # สร้างหน้าต่างหลัก
 window = tk.Tk()
-window.title("Pharmacy File Manager")
+window.title("Report Payment Tool")
 
 # กำหนดขนาดหน้าต่าง
 window_width = 400
@@ -64,14 +117,14 @@ output_button = ttk.Button(output_frame, text="Browse...", command=browse_output
 output_button.pack(side="right")
 
 # ข้อมูลเพิ่มเติม
-file_info_label = ttk.Label(main_frame, text="พบไฟล์ Excel: ", justify="left")
+file_info_label = ttk.Label(main_frame, text="กรุณาเลือกโฟลเดอร์", justify="left")
 file_info_label.pack(pady=10)
 
 # เฟรมสำหรับปุ่มควบคุม
 button_frame = ttk.Frame(main_frame)
 button_frame.pack(pady=10)
 
-process_button = ttk.Button(button_frame, text="เริ่มประมวลผล")
+process_button = ttk.Button(button_frame, text="เริ่มประมวลผล", command = process_files)
 process_button.pack(side="left", padx=5)
 
 window.mainloop()
