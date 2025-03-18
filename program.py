@@ -52,16 +52,48 @@ def process_files():
                 file_info_label.config(text=f"ไฟล์ {file_name} ไม่มีคอลัมน์ที่ต้องการ")
                 continue
             
-            # สร้างลำดับใหม่สำหรับบิล (ORR)
+            # สร้างลำดับใหม่สำหรับบิล (ORR) และคำนวณราคาใหม่สำหรับรายการที่มี @
             new_order = 1
+            current_bill_total = 0  # ตัวแปรเก็บราคารวมของบิลปัจจุบัน
+            current_bill_start_idx = None  # ตัวแปรเก็บ index เริ่มต้นของบิล
+
             for idx, row in df.iterrows():
+                # ถ้าเป็นบิล (ORR)
                 if isinstance(row['รายการ'], str) and row['รายการ'].startswith('ORR'):
+                    # ถ้ามีบิลก่อนหน้า ให้อัปเดตราคารวมของบิลนั้น
+                    if current_bill_start_idx is not None:
+                        df.at[current_bill_start_idx, 'ราคาสุทธิ'] = round(current_bill_total)
+                    # เริ่มบิลใหม่
                     df.at[idx, 'ลำดับ'] = new_order
                     new_order += 1
+                    current_bill_total = 0
+                    current_bill_start_idx = idx
                 else:
                     # ถ้าไม่ใช่บิล (เช่น เป็นสินค้า P-xxx) ให้ลำดับเป็นว่าง
                     df.at[idx, 'ลำดับ'] = ''
-                    
+                    # ตรวจสอบว่ารายการมี @ หรือไม่
+                    if isinstance(row['รายการ'], str) and '@' in row['รายการ']:
+                        # คำนวณราคาต่อหน่วยใหม่
+                        old_price = row['ราคาต่อหน่วย']
+                        if pd.notna(old_price) and isinstance(old_price, (int, float)):
+                            new_price = (old_price - (old_price * 10 / 110)) * 1.03
+                            new_price = round(new_price)  # ปัดเป็นจำนวนเต็ม
+                            df.at[idx, 'ราคาต่อหน่วย'] = new_price
+                            # คำนวณราคาสุทธิใหม่
+                            quantity = row['จำนวน']
+                            if pd.notna(quantity) and isinstance(quantity, (int, float)):
+                                new_net_price = new_price * quantity
+                                df.at[idx, 'ราคาสุทธิ'] = new_net_price
+                                current_bill_total += new_net_price
+                    else:
+                        # ถ้าไม่มี @ ใช้ราคาสุทธิเดิม
+                        net_price = row['ราคาสุทธิ']
+                        if pd.notna(net_price) and isinstance(net_price, (int, float)):
+                            current_bill_total += net_price
+
+            # อัปเดตราคารวมของบิลสุดท้าย
+            if current_bill_start_idx is not None:
+                df.at[current_bill_start_idx, 'ราคาสุทธิ'] = round(current_bill_total)
             
             # บันทึกไฟล์ใหม่ในโฟลเดอร์ที่สร้าง โดยใช้ชื่อเดิม + "แก้ไขแล้ว"
             output_file_name = f"{os.path.splitext(file_name)[0]}_แก้ไขแล้ว{os.path.splitext(file_name)[1]}"
