@@ -3,6 +3,7 @@ from tkinter import filedialog, ttk
 import os
 import pandas as pd
 from openpyxl import load_workbook
+from openpyxl.styles import Font
 
 # ตัวแปร global สำหรับเก็บ path
 input_path = ""
@@ -52,10 +53,14 @@ def process_files():
                 file_info_label.config(text=f"ไฟล์ {file_name} ไม่มีคอลัมน์ที่ต้องการ")
                 continue
             
+            # เก็บ index ของรายการที่มี @ และบิลที่เกี่ยวข้อง
+            special_items_indices = []  # เก็บ index ของรายการที่มี @
+            affected_bills_indices = set()  # เก็บ index ของบิลที่ต้องอัปเดตสี
+
             # สร้างลำดับใหม่สำหรับบิล (ORR) และคำนวณราคาใหม่สำหรับรายการที่มี @
             new_order = 1
-            current_bill_total = 0  # ตัวแปรเก็บราคารวมของบิลปัจจุบัน
-            current_bill_start_idx = None  # ตัวแปรเก็บ index เริ่มต้นของบิล
+            current_bill_total = 0
+            current_bill_start_idx = None
 
             for idx, row in df.iterrows():
                 # ถ้าเป็นบิล (ORR)
@@ -73,6 +78,11 @@ def process_files():
                     df.at[idx, 'ลำดับ'] = ''
                     # ตรวจสอบว่ารายการมี @ หรือไม่
                     if isinstance(row['รายการ'], str) and '@' in row['รายการ']:
+                        # เพิ่ม index ของรายการที่มี @ เพื่อเปลี่ยนสี
+                        special_items_indices.append(idx)
+                        # เพิ่ม index ของบิลที่เกี่ยวข้องเพื่อเปลี่ยนสี
+                        if current_bill_start_idx is not None:
+                            affected_bills_indices.add(current_bill_start_idx)
                         # คำนวณราคาต่อหน่วยใหม่
                         old_price = row['ราคาต่อหน่วย']
                         if pd.notna(old_price) and isinstance(old_price, (int, float)):
@@ -100,13 +110,17 @@ def process_files():
             output_file = os.path.join(new_output_folder, output_file_name)
             df.to_excel(output_file, index=False)
 
-            # เปิดไฟล์ Excel ด้วย openpyxl เพื่อกำหนดรูปแบบและความกว้าง
+            # เปิดไฟล์ Excel ด้วย openpyxl เพื่อกำหนดรูปแบบ ความกว้าง และสี
             workbook = load_workbook(output_file)
             worksheet = workbook.active
 
             # กำหนดรูปแบบตัวเลขในคอลัมน์ 'ราคาต่อหน่วย', 'จำนวน', 'ราคาสุทธิ'
             numeric_columns = ['ราคาต่อหน่วย', 'จำนวน', 'ราคาสุทธิ']
             col_indices = [df.columns.get_loc(col) + 1 for col in numeric_columns]  # +1 เพราะ openpyxl เริ่มที่ 1
+            price_per_unit_col = df.columns.get_loc('ราคาต่อหน่วย') + 1
+            net_price_col = df.columns.get_loc('ราคาสุทธิ') + 1
+            item_col = df.columns.get_loc('รายการ') + 1
+
             for col_idx in col_indices:
                 for row in range(2, worksheet.max_row + 1):  # เริ่มที่แถว 2 (ข้าม header)
                     cell = worksheet.cell(row=row, column=col_idx)
@@ -115,6 +129,28 @@ def process_files():
                         cell.number_format = '"-"'
                     else:
                         cell.number_format = '0'  # รูปแบบปกติ (จำนวนเต็ม)
+
+            # กำหนดสีแดงสำหรับรายการที่มี @ และตัวเลขที่อัปเดต
+            red_font = Font(color="FF0000")  # สีแดง
+
+            # เปลี่ยนสีสำหรับรายการที่มี @ (คอลัมน์ 'รายการ')
+            for idx in special_items_indices:
+                row = idx + 2  # +2 เพราะ openpyxl เริ่มที่ 1 และข้าม header
+                # เปลี่ยนสีคอลัมน์ 'รายการ'
+                cell_item = worksheet.cell(row=row, column=item_col)
+                cell_item.font = red_font
+                # เปลี่ยนสีคอลัมน์ 'ราคาต่อหน่วย'
+                cell_price = worksheet.cell(row=row, column=price_per_unit_col)
+                cell_price.font = red_font
+                # เปลี่ยนสีคอลัมน์ 'ราคาสุทธิ'
+                cell_net_price = worksheet.cell(row=row, column=net_price_col)
+                cell_net_price.font = red_font
+
+            # เปลี่ยนสีสำหรับบิล (ORR) ที่มีการอัปเดตราคา
+            for idx in affected_bills_indices:
+                row = idx + 2  # +2 เพราะ openpyxl เริ่มที่ 1 และข้าม header
+                cell_net_price = worksheet.cell(row=row, column=net_price_col)
+                cell_net_price.font = red_font
 
             # คำนวณความกว้างอัตโนมัติสำหรับแต่ละคอลัมน์ (ไม่คูณ 1.2)
             for i, column in enumerate(df.columns, 1):
@@ -126,7 +162,7 @@ def process_files():
                     max_length = max(max_length, 1)  # ความกว้างอย่างน้อย 1 สำหรับ "-"
                 worksheet.column_dimensions[col_letter].width = max_length
 
-            # บันทึกไฟล์ที่ปรับรูปแบบและความกว้างแล้ว
+            # บันทึกไฟล์ที่ปรับรูปแบบ ความกว้าง และสีแล้ว
             workbook.save(output_file)
             
             file_info_label.config(text=f"ประมวลผลสำเร็จ: {file_name}")
