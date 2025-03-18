@@ -4,39 +4,49 @@ import os
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Font
+import platform
 
-# ตัวแปร global สำหรับเก็บ path
+# Global variables
 input_path = ""
 output_path = ""
+new_output_folder = ""  # เพิ่มตัวแปรสำหรับเก็บ path โฟลเดอร์ปลายทาง
 
 def browse_input_folder():
     global input_path
     folder_path = filedialog.askdirectory()
     if folder_path:
         input_path = folder_path
-        input_label.config(text=input_path)
+        input_label.config(text=folder_path)
         excel_files = [f for f in os.listdir(input_path) if f.endswith(('.xlsx', '.xls'))]
-        file_info_label.config(text=f"พบไฟล์ Excel: {len(excel_files)} ไฟล์")
+        status_label.config(text=f"พบ {len(excel_files)} ไฟล์ Excel")
 
 def browse_output_folder():
     global output_path
     folder_path = filedialog.askdirectory()
     if folder_path:
         output_path = folder_path
-        output_label.config(text=output_path)
+        output_label.config(text=folder_path)
+
+def open_output_folder():
+    if new_output_folder:
+        if platform.system() == "Windows":
+            os.startfile(new_output_folder)
+        elif platform.system() == "Darwin":  # macOS
+            os.system(f"open {new_output_folder}")
+        else:  # Linux
+            os.system(f"xdg-open {new_output_folder}")
 
 def process_files():
-    # ตรวจสอบว่าเลือกโฟลเดอร์ครบหรือไม่
+    global new_output_folder
     if not input_path or not output_path:
-        file_info_label.config(text="กรุณาเลือกโฟลเดอร์ทั้งสอง")
-        return
-    # ดึงรายการไฟล์ Excel จาก input folder
-    excel_files = [f for f in os.listdir(input_path) if f.endswith(('.xlsx', '.xls'))]
-    if not excel_files:
-        file_info_label.config(text="ไม่พบไฟล์ Excel ในโฟลเดอร์")
+        status_label.config(text="กรุณาเลือกโฟลเดอร์ทั้งสอง")
         return
     
-    # สร้างโฟลเดอร์ใหม่ใน output path โดยใช้ชื่อ input folder + "แก้ไขแล้ว"
+    excel_files = [f for f in os.listdir(input_path) if f.endswith(('.xlsx', '.xls'))]
+    if not excel_files:
+        status_label.config(text="ไม่พบไฟล์ Excel")
+        return
+    
     input_folder_name = os.path.basename(input_path)
     new_output_folder = os.path.join(output_path, f"{input_folder_name}_แก้ไขแล้ว")
     os.makedirs(new_output_folder, exist_ok=True)
@@ -44,186 +54,140 @@ def process_files():
     for file_name in excel_files:
         file_path = os.path.join(input_path, file_name)
         try:
-            # อ่านไฟล์ Excel
             df = pd.read_excel(file_path)
-            
-            # ตรวจสอบว่ามีคอลัมน์ครบตามที่ระบุ
             expected_columns = ['ลำดับ', 'รายการ', 'วันที่', 'ราคาต่อหน่วย', 'จำนวน', 'ราคาสุทธิ']
             if not all(col in df.columns for col in expected_columns):
-                file_info_label.config(text=f"ไฟล์ {file_name} ไม่มีคอลัมน์ที่ต้องการ")
+                status_label.config(text=f"ไฟล์ {file_name} คอลัมน์ไม่ครบ")
                 continue
             
-            # เก็บ index ของรายการที่มี @ และบิลที่เกี่ยวข้อง
-            special_items_indices = []  # เก็บ index ของรายการที่มี @
-            affected_bills_indices = set()  # เก็บ index ของบิลที่ต้องอัปเดตสี
-
-            # สร้างลำดับใหม่สำหรับบิล (ORR) และคำนวณราคาใหม่สำหรับรายการที่มี @
+            special_items_indices = []
+            affected_bills_indices = set()
             new_order = 1
             current_bill_total = 0
             current_bill_start_idx = None
 
             for idx, row in df.iterrows():
-                # ถ้าเป็นบิล (ORR)
                 if isinstance(row['รายการ'], str) and row['รายการ'].startswith('ORR'):
-                    # ถ้ามีบิลก่อนหน้า ให้อัปเดตราคารวมของบิลนั้น
                     if current_bill_start_idx is not None:
                         df.at[current_bill_start_idx, 'ราคาสุทธิ'] = round(current_bill_total)
-                    # เริ่มบิลใหม่
                     df.at[idx, 'ลำดับ'] = new_order
                     new_order += 1
                     current_bill_total = 0
                     current_bill_start_idx = idx
                 else:
-                    # ถ้าไม่ใช่บิล (เช่น เป็นสินค้า P-xxx) ให้ลำดับเป็นว่าง
                     df.at[idx, 'ลำดับ'] = ''
-                    # ตรวจสอบว่ารายการมี @ หรือไม่
                     if isinstance(row['รายการ'], str) and '@' in row['รายการ']:
-                        # เพิ่ม index ของรายการที่มี @ เพื่อเปลี่ยนสี
                         special_items_indices.append(idx)
-                        # เพิ่ม index ของบิลที่เกี่ยวข้องเพื่อเปลี่ยนสี
                         if current_bill_start_idx is not None:
                             affected_bills_indices.add(current_bill_start_idx)
-                        # คำนวณราคาต่อหน่วยใหม่
                         old_price = row['ราคาต่อหน่วย']
                         if pd.notna(old_price) and isinstance(old_price, (int, float)):
-                            new_price = (old_price - (old_price * 10 / 110)) * 1.03
-                            new_price = round(new_price)  # ปัดเป็นจำนวนเต็ม
+                            new_price = round((old_price - (old_price * 10 / 110)) * 1.03)
                             df.at[idx, 'ราคาต่อหน่วย'] = new_price
-                            # คำนวณราคาสุทธิใหม่
                             quantity = row['จำนวน']
                             if pd.notna(quantity) and isinstance(quantity, (int, float)):
                                 new_net_price = new_price * quantity
                                 df.at[idx, 'ราคาสุทธิ'] = new_net_price
                                 current_bill_total += new_net_price
                     else:
-                        # ถ้าไม่มี @ ใช้ราคาสุทธิเดิม
                         net_price = row['ราคาสุทธิ']
                         if pd.notna(net_price) and isinstance(net_price, (int, float)):
                             current_bill_total += net_price
 
-            # อัปเดตราคารวมของบิลสุดท้าย
             if current_bill_start_idx is not None:
                 df.at[current_bill_start_idx, 'ราคาสุทธิ'] = round(current_bill_total)
-            
-            # บันทึกไฟล์ใหม่ในโฟลเดอร์ที่สร้าง โดยใช้ชื่อเดิม + "แก้ไขแล้ว"
+
             output_file_name = f"{os.path.splitext(file_name)[0]}_แก้ไขแล้ว{os.path.splitext(file_name)[1]}"
             output_file = os.path.join(new_output_folder, output_file_name)
             df.to_excel(output_file, index=False)
 
-            # เปิดไฟล์ Excel ด้วย openpyxl เพื่อกำหนดรูปแบบ ความกว้าง และสี
             workbook = load_workbook(output_file)
             worksheet = workbook.active
-
-            # กำหนดรูปแบบตัวเลขในคอลัมน์ 'ราคาต่อหน่วย', 'จำนวน', 'ราคาสุทธิ'
             numeric_columns = ['ราคาต่อหน่วย', 'จำนวน', 'ราคาสุทธิ']
-            col_indices = [df.columns.get_loc(col) + 1 for col in numeric_columns]  # +1 เพราะ openpyxl เริ่มที่ 1
+            col_indices = [df.columns.get_loc(col) + 1 for col in numeric_columns]
             price_per_unit_col = df.columns.get_loc('ราคาต่อหน่วย') + 1
             net_price_col = df.columns.get_loc('ราคาสุทธิ') + 1
             item_col = df.columns.get_loc('รายการ') + 1
 
             for col_idx in col_indices:
-                for row in range(2, worksheet.max_row + 1):  # เริ่มที่แถว 2 (ข้าม header)
+                for row in range(2, worksheet.max_row + 1):
                     cell = worksheet.cell(row=row, column=col_idx)
-                    # ถ้าค่าในเซลล์เป็น 0 (หรือใกล้เคียง) ให้กำหนดรูปแบบพิเศษ
                     if cell.value is not None and isinstance(cell.value, (int, float)) and abs(cell.value) < 0.0001:
                         cell.number_format = '"-"'
                     else:
-                        cell.number_format = '0'  # รูปแบบปกติ (จำนวนเต็ม)
+                        cell.number_format = '0'
 
-            # กำหนดสีแดงสำหรับรายการที่มี @ และตัวเลขที่อัปเดต
-            red_font = Font(color="FF0000")  # สีแดง
-
-            # เปลี่ยนสีสำหรับรายการที่มี @ (คอลัมน์ 'รายการ')
+            red_font = Font(color="FF0000")
             for idx in special_items_indices:
-                row = idx + 2  # +2 เพราะ openpyxl เริ่มที่ 1 และข้าม header
-                # เปลี่ยนสีคอลัมน์ 'รายการ'
-                cell_item = worksheet.cell(row=row, column=item_col)
-                cell_item.font = red_font
-                # เปลี่ยนสีคอลัมน์ 'ราคาต่อหน่วย'
-                cell_price = worksheet.cell(row=row, column=price_per_unit_col)
-                cell_price.font = red_font
-                # เปลี่ยนสีคอลัมน์ 'ราคาสุทธิ'
-                cell_net_price = worksheet.cell(row=row, column=net_price_col)
-                cell_net_price.font = red_font
+                row = idx + 2
+                worksheet.cell(row=row, column=item_col).font = red_font
+                worksheet.cell(row=row, column=price_per_unit_col).font = red_font
+                worksheet.cell(row=row, column=net_price_col).font = red_font
 
-            # เปลี่ยนสีสำหรับบิล (ORR) ที่มีการอัปเดตราคา
             for idx in affected_bills_indices:
-                row = idx + 2  # +2 เพราะ openpyxl เริ่มที่ 1 และข้าม header
-                cell_net_price = worksheet.cell(row=row, column=net_price_col)
-                cell_net_price.font = red_font
+                worksheet.cell(row=idx + 2, column=net_price_col).font = red_font
 
-            # คำนวณความกว้างอัตโนมัติสำหรับแต่ละคอลัมน์ (ไม่คูณ 1.2)
             for i, column in enumerate(df.columns, 1):
-                col_letter = chr(64 + i)  # แปลงเลขคอลัมน์เป็นตัวอักษร (A, B, C, ...)
-                # หาความยาวสูงสุดของข้อความในคอลัมน์ (รวม header)
+                col_letter = chr(64 + i)
                 max_length = max(df[column].astype(str).apply(len).max(), len(str(column)))
-                # ถ้าคอลัมน์อยู่ใน numeric_columns และมีค่า 0 ให้เผื่อความกว้างสำหรับ "-"
                 if column in numeric_columns:
-                    max_length = max(max_length, 1)  # ความกว้างอย่างน้อย 1 สำหรับ "-"
+                    max_length = max(max_length, 1)
                 worksheet.column_dimensions[col_letter].width = max_length
 
-            # บันทึกไฟล์ที่ปรับรูปแบบ ความกว้าง และสีแล้ว
             workbook.save(output_file)
-            
-            file_info_label.config(text=f"ประมวลผลสำเร็จ: {file_name}")
-        
+            status_label.config(text="ประมวลผลสำเร็จ" ,foreground="green")
+            # แสดงปุ่ม "เปิดโฟลเดอร์" เมื่อประมวลผลสำเร็จ
+            open_folder_button.pack(pady=10)
+
         except Exception as e:
-            file_info_label.config(text=f"เกิดข้อผิดพลาดกับ {file_name}: {str(e)}")
+            status_label.config(text=f"ข้อผิดพลาด: {file_name}",foreground="red")
             continue
 
-# สร้างหน้าต่างหลัก
+# GUI Setup
 window = tk.Tk()
 window.title("Report Payment Tool")
+window.geometry("500x350")
+window.resizable(False, False)
 
-# กำหนดขนาดหน้าต่าง
-window_width = 400
-window_height = 220
+# Style configuration
+style = ttk.Style()
+style.configure("TButton", font=("Helvetica", 10), padding=5)
+style.configure("TLabel", font=("Helvetica", 10))
 
-# คำนวณตำแหน่งให้อยู่กลางจอ
-screen_width = window.winfo_screenwidth()
-screen_height = window.winfo_screenheight()
-x_coordinate = int((screen_width / 2) - (window_width / 2))
-y_coordinate = int((screen_height / 2) - (window_height / 2))
-
-# ตั้งค่าขนาดและตำแหน่ง
-window.geometry(f"{window_width}x{window_height}+{x_coordinate}+{y_coordinate}")
-window.minsize(400, 220)
-
-# เฟรมหลัก
-main_frame = ttk.Frame(window, padding="10")
+# Main frame
+main_frame = ttk.Frame(window, padding="20")
 main_frame.pack(fill="both", expand=True)
 
-# เลเบลและปุ่มสำหรับ Input Folder
-ttk.Label(main_frame, text="Input Folder (โฟลเดอร์ที่มีไฟล์ Excel)").pack(pady=5)
+# Input Folder Section
+ttk.Label(main_frame, text="โฟลเดอร์ต้นทาง", font=("Helvetica", 11, "bold")).pack(anchor="w", pady=(0, 5))
 input_frame = ttk.Frame(main_frame)
-input_frame.pack(fill="x")
+input_frame.pack(fill="x", pady=(0, 10))
+input_label = ttk.Label(input_frame, text="ยังไม่ได้เลือก", wraplength=350, foreground="#555555")
+input_label.pack(side="left", fill="x", expand=True)
+ttk.Button(input_frame, text="เลือก", command=browse_input_folder).pack(side="right")
 
-input_label = ttk.Label(input_frame, text="ยังไม่ได้เลือกโฟลเดอร์", wraplength=300)
-input_label.pack(side="left", padx=5, fill="x", expand=True)
-
-input_button = ttk.Button(input_frame, text="Browse...", command=browse_input_folder)
-input_button.pack(side="right")
-
-# เลเบลและปุ่มสำหรับ Output Folder
-ttk.Label(main_frame, text="Output Folder (โฟลเดอร์ปลายทาง)").pack(pady=5)
+# Output Folder Section
+ttk.Label(main_frame, text="โฟลเดอร์ปลายทาง", font=("Helvetica", 11, "bold")).pack(anchor="w", pady=(0, 5))
 output_frame = ttk.Frame(main_frame)
-output_frame.pack(fill="x")
+output_frame.pack(fill="x", pady=(0, 10))
+output_label = ttk.Label(output_frame, text="ยังไม่ได้เลือก", wraplength=350, foreground="#555555")
+output_label.pack(side="left", fill="x", expand=True)
+ttk.Button(output_frame, text="เลือก", command=browse_output_folder).pack(side="right")
 
-output_label = ttk.Label(output_frame, text="ยังไม่ได้เลือกโฟลเดอร์", wraplength=300)
-output_label.pack(side="left", padx=5, fill="x", expand=True)
+# Status Label
+status_label = ttk.Label(main_frame, text="พร้อมเริ่มต้น", foreground="#666666")
+status_label.pack(pady=15)
 
-output_button = ttk.Button(output_frame, text="Browse...", command=browse_output_folder)
-output_button.pack(side="right")
+# Process Button
+ttk.Button(main_frame, text="ประมวลผล", command=process_files, width=20).pack()
 
-# ข้อมูลเพิ่มเติม
-file_info_label = ttk.Label(main_frame, text="กรุณาเลือกโฟลเดอร์", justify="left")
-file_info_label.pack(pady=10)
+open_folder_button = ttk.Button(main_frame, text="เปิดโฟลเดอร์", command=open_output_folder, width=20)
 
-# เฟรมสำหรับปุ่มควบคุม
-button_frame = ttk.Frame(main_frame)
-button_frame.pack(pady=10)
-
-process_button = ttk.Button(button_frame, text="เริ่มประมวลผล", command=process_files)
-process_button.pack(side="left", padx=5)
+# Center window
+window.update_idletasks()
+width, height = window.winfo_width(), window.winfo_height()
+x = (window.winfo_screenwidth() // 2) - (width // 2)
+y = (window.winfo_screenheight() // 2) - (height // 2)
+window.geometry(f"+{x}+{y}")
 
 window.mainloop()
