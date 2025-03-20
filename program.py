@@ -1,5 +1,8 @@
 import tkinter as tk
-from tkinter import filedialog, ttk
+from tkinter import filedialog
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
+import tkinter.font 
 import os
 import pandas as pd
 from openpyxl import load_workbook
@@ -11,12 +14,27 @@ input_path = ""
 output_path = ""
 new_output_folder = ""  # เพิ่มตัวแปรสำหรับเก็บ path โฟลเดอร์ปลายทาง
 
+def shorten_path(path, max_length=40, max_filename_length=26):
+    if len(path) <= max_length:
+        return path
+    path = os.path.normpath(path)
+    directory, filename = os.path.split(path) # แยก path เป็นชื่อไฟล์กับ directory
+    if len(filename) > max_filename_length:
+        name, ext = os.path.splitext(filename)
+        shortened_name = name[:max_filename_length - len(ext) - 3] + '...'
+        filename = shortened_name + ext
+    parts = directory.split(os.sep)  
+    if len(parts) >= 3 :
+        shortened_dir = os.sep.join([parts[0], "..."] + parts[-2:])
+        return os.path.join(shortened_dir, filename)
+    return os.path.join(directory, filename)
+
 def browse_input_folder():
     global input_path
     folder_path = filedialog.askdirectory()
     if folder_path:
         input_path = folder_path
-        input_label.config(text=folder_path)
+        input_label.config(text=shorten_path(folder_path))
         excel_files = [f for f in os.listdir(input_path) if f.endswith(('.xlsx', '.xls'))]
         status_label.config(text=f"พบ {len(excel_files)} ไฟล์ Excel")
 
@@ -25,7 +43,7 @@ def browse_output_folder():
     folder_path = filedialog.askdirectory()
     if folder_path:
         output_path = folder_path
-        output_label.config(text=folder_path)
+        output_label.config(text=shorten_path(folder_path))
 
 def open_output_folder():
     if new_output_folder:
@@ -141,47 +159,50 @@ def process_files():
 
         except Exception as e:
             status_label.config(text=f"ข้อผิดพลาด: {file_name}",foreground="red")
-            continue
+            continue 
 
 # GUI Setup
-window = tk.Tk()
+window = ttk.Window(themename="cosmo")
 window.title("Report Payment Tool")
-window.geometry("500x350")
+window.geometry("720x480")
 window.resizable(False, False)
+topic_btn = tkinter.font.Font( family = "TH Sarabun New",  size = 20,  weight = "bold") 
+label_font = tkinter.font.Font( family = "TH Sarabun New",  size = 16) 
 
 # Style configuration
 style = ttk.Style()
-style.configure("TButton", font=("Helvetica", 10), padding=5)
-style.configure("TLabel", font=("Helvetica", 10))
+style.configure("TButton", font=topic_btn, padding=5)
+style.configure("TLabel", font=label_font)
 
 # Main frame
 main_frame = ttk.Frame(window, padding="20")
 main_frame.pack(fill="both", expand=True)
 
 # Input Folder Section
-ttk.Label(main_frame, text="โฟลเดอร์ต้นทาง", font=("Helvetica", 11, "bold")).pack(anchor="w", pady=(0, 5))
+ttk.Label(main_frame, text="โฟลเดอร์ต้นทาง", font=topic_btn).pack(anchor="w", pady=(0, 5))
 input_frame = ttk.Frame(main_frame)
 input_frame.pack(fill="x", pady=(0, 10))
-input_label = ttk.Label(input_frame, text="ยังไม่ได้เลือก", wraplength=350, foreground="#555555")
+input_label = ttk.Label(input_frame, text="ยังไม่ได้เลือก", wraplength=450, foreground="#555555")
 input_label.pack(side="left", fill="x", expand=True)
-ttk.Button(input_frame, text="เลือก", command=browse_input_folder).pack(side="right")
+ttk.Button(input_frame, text="เลือก", command=browse_input_folder, bootstyle=PRIMARY).pack(side="right")
+
 
 # Output Folder Section
-ttk.Label(main_frame, text="โฟลเดอร์ปลายทาง", font=("Helvetica", 11, "bold")).pack(anchor="w", pady=(0, 5))
+ttk.Label(main_frame, text="โฟลเดอร์ปลายทาง", font=topic_btn).pack(anchor="w", pady=(0, 5))
 output_frame = ttk.Frame(main_frame)
 output_frame.pack(fill="x", pady=(0, 10))
-output_label = ttk.Label(output_frame, text="ยังไม่ได้เลือก", wraplength=350, foreground="#555555")
+output_label = ttk.Label(output_frame, text="ยังไม่ได้เลือก", wraplength=450, foreground="#555555")
 output_label.pack(side="left", fill="x", expand=True)
-ttk.Button(output_frame, text="เลือก", command=browse_output_folder).pack(side="right")
+ttk.Button(output_frame, text="เลือก", command=browse_output_folder, bootstyle=PRIMARY).pack(side="right")
 
 # Status Label
 status_label = ttk.Label(main_frame, text="พร้อมเริ่มต้น", foreground="#666666")
 status_label.pack(pady=15)
 
 # Process Button
-ttk.Button(main_frame, text="ประมวลผล", command=process_files, width=20).pack()
+ttk.Button(main_frame, text="ประมวลผล", command=process_files, width=20, bootstyle=PRIMARY).pack()
 
-open_folder_button = ttk.Button(main_frame, text="เปิดโฟลเดอร์", command=open_output_folder, width=20)
+open_folder_button = ttk.Button(main_frame, text="เปิดโฟลเดอร์", command=open_output_folder, width=20, bootstyle=SUCCESS)
 
 # Center window
 window.update_idletasks()
